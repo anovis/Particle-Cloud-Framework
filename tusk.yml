@@ -1,0 +1,15 @@
+tasks:
+  docs:
+    usage: make docs
+    run: cd docs; make html
+
+  docs-add:
+    usage: add new files to docs
+    run: 	cd docs; sphinx-apidoc -o source ../pcf ../pcf/test/*
+
+  py-pi:
+    options:
+      tag:
+        usage: version to tag pcf release
+        default: 0.0.0
+    run: export $(tag); python setup.py bdist_wheel; python -m twine upload dist/*
