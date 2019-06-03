@@ -19,6 +19,9 @@ from botocore.errorfactory import ClientError
 from pcf.particle.aws.iam.iam_policy import IAMPolicy 
 
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class IAMRole(AWSResource):
     """
@@ -49,11 +52,8 @@ class IAMRole(AWSResource):
 
     UNIQUE_KEYS = ["aws_resource.RoleName"]
 
-    def __init__(self, particle_definition):
-        super(IAMRole, self).__init__(
-            particle_definition=particle_definition,
-            resource_name="iam",
-        )
+    def __init__(self, particle_definition, session=None):
+        super().__init__(particle_definition=particle_definition, resource_name="iam", session=session)
         self.role_name = self.desired_state_definition.get('RoleName')
         self.custom_config['policy_arns'] = self.custom_config.get('policy_arns', [])
         self._set_unique_keys()
@@ -99,9 +99,22 @@ class IAMRole(AWSResource):
             for policy in attached_policies.get('AttachedPolicies'):
                 self.client.detach_role_policy(RoleName=self.role_name, PolicyArn=policy.get('PolicyArn'))
 
+        if self.custom_config.get('IsInstanceProfile'):
+            try:
+                self.client.remove_role_from_instance_profile(InstanceProfileName=self.role_name, RoleName=self.role_name)
+            except ClientError as e:
+                logger.info(e)
 
+            try:
+                self.client.delete_instance_profile(InstanceProfileName=self.role_name)
+            except ClientError as e:
+                logger.info(e)
 
-        return self.client.delete_role(RoleName=self.role_name)
+        try:
+            self.client.delete_role(RoleName=self.role_name)
+        except ClientError as e:
+            raise e
+
 
     def _start(self):
         """
@@ -117,6 +130,17 @@ class IAMRole(AWSResource):
             self.client.create_role(**create_definition)
         except ClientError as e:
             raise e
+
+        if self.custom_config.get('IsInstanceProfile', False):
+            try:
+                self.client.create_instance_profile(InstanceProfileName=self.role_name)
+            except ClientError as e:
+                logger.info(e)
+
+            try:
+                self.client.add_role_to_instance_profile(InstanceProfileName=self.role_name, RoleName=self.role_name)
+            except ClientError as e:
+                logger.info(e)
 
     def _stop(self):
         """
@@ -220,7 +244,7 @@ class IAMRole(AWSResource):
 
             if isinstance(self.desired_state_definition.get('AssumeRolePolicyDocument'), str):    
                 self.desired_state_definition['AssumeRolePolicyDocument'] = json.loads(self.desired_state_definition.get('AssumeRolePolicyDocument'))
-
+            self.current_state_definition['custom_config']['IsInstanceProfile'] = self.custom_config.get('IsInstanceProfile', False)
             diff_dict = pcf_util.diff_dict(self.current_state_definition, self.desired_state_definition)
 
         return diff_dict == {}
