@@ -60,6 +60,7 @@ class Particle(object, metaclass=MetaParticle):
         self.validate_unique_id()
         self.persist_on_termination = self.particle_definition.get("persist_on_termination", False)
         self.persist_on_update = self.particle_definition.get("persist_on_update", False)
+        self.desired_tags = self.particle_definition.get("tags", {})
         self.callbacks = self.particle_definition.get("callbacks", {})
         self.desired_state = STATE_STRING_TO_ENUM.get(self.particle_definition.get("desired_state"))
         self.current_state_definition = {}
@@ -338,6 +339,48 @@ class Particle(object, metaclass=MetaParticle):
 
         return True
 
+    def apply_tags(self):
+        """
+        Logic to set tags of a particle. Requires both get_current_tags and set_tags if their is a tag field
+        or a tagging parent particle.
+        """
+        d_tags = self.get_desired_tags()
+        if not d_tags:
+            return
+
+        c_tags = self.get_current_tags()
+        while c_tags != d_tags:
+            self.set_tags()
+
+    def get_current_tags(self):
+        """
+        Function to return the current particles tags
+
+        Returns:
+            tags (dict)
+
+        """
+        raise NotImplemented
+
+    def set_tags(self):
+        """
+        Logic to add, update, and delete tags. Implemented on the resource level
+        """
+        raise NotImplemented
+
+    def get_desired_tags(self):
+        """
+        Get the desired_tags for this particle and if it had a tagging parrent then those tags as well.
+        The particle's tags get precedence over its parent.
+
+        Returns:
+            tags (dict)
+        """
+        tagging_parents = list(filter(lambda x: 'tagging' in x.flavor, self.parents))
+        for parent in tagging_parents:
+            self.desired_tags.update(parent.desired_tags)
+        return self.desired_tags
+
     def get_and_replace_parent_variables(self):
         """
         Checks the particles desired state definition and checks to see if there are values that
@@ -588,3 +631,32 @@ class Particle(object, metaclass=MetaParticle):
             return value
         else:
             return default
+
+
+class StatelessParticle(Particle):
+        """
+         This is an implementation of a particle that has no state. The state of this particle
+         will change to whatever the desired state is set too.
+
+        """
+        def __init__(self, particle_definition):
+            super(StatelessParticle, self).__init__(particle_definition)
+
+        def sync_state(self):
+            try:
+                return self.state
+            except NameError:
+                self.state = State.terminated
+                return self.state
+
+        def _start(self):
+            self.state = State.running
+
+        def _terminate(self):
+            self.state = State.terminated
+
+        def _stop(self):
+            self.state = State.stopped
+
+        def is_state_definition_equivalent(self):
+            return True
